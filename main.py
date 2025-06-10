@@ -1,7 +1,7 @@
 import os
 import numpy as np
 import pickle
-from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi import FastAPI, File, UploadFile, HTTPException, Request
 import tensorflow as tf
 import tensorflow_hub as hub
 import librosa
@@ -126,8 +126,8 @@ async def get_bird_image(bird_name: str):
         logging.info(f"Checking file: {file_path}")
         if os.path.exists(file_path):
             # Use relative URL assuming your server is running at this IP
-            image_url = f"http://192.168.0.167:8000/static/{filename}"
-            logging.info(f"Serving image URL: {image_url}")
+            base_url = str(request.base_url)
+            image_url = f"/{base_url}static/{filename}"
             return JSONResponse(content={"image_url": image_url})
 
     # If no matching image found
