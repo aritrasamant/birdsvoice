@@ -8,7 +8,7 @@ import tensorflow as tf
 import tensorflow_hub as hub
 import librosa
 import logging
-
+os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 app = FastAPI()
 
 # Logging
