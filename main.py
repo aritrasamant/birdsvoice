@@ -9,6 +9,12 @@ import tensorflow_hub as hub
 import librosa
 import logging
 os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+import tensorflow as tf
+
+# Limit TensorFlow memory usage (add after importing tf)
+tf.config.threading.set_intra_op_parallelism_threads(1)
+tf.config.threading.set_inter_op_parallelism_threads(1)
+
 app = FastAPI()
 
 # Logging
