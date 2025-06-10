@@ -1,5 +1,4 @@
-models/
-uploads/
-*.keras
-*.pkl
-__pycache__/
+#models/
+#*.keras
+#*.pkl
+#__pycache__/
