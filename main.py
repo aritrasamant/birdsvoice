@@ -1,38 +1,32 @@
-from fastapi import FastAPI, File, UploadFile, HTTPException, Request
-from fastapi.responses import JSONResponse
-from fastapi.staticfiles import StaticFiles
 import os
 import numpy as np
 import pickle
+from fastapi import FastAPI, File, UploadFile, HTTPException, Request
+from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 import tensorflow as tf
 import tensorflow_hub as hub
 import librosa
 import logging
-os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
-import tensorflow as tf
-
-# Limit TensorFlow memory usage (add after importing tf)
-tf.config.threading.set_intra_op_parallelism_threads(1)
-tf.config.threading.set_inter_op_parallelism_threads(1)
 
 app = FastAPI()
 
-# Logging
+# Configure logging
 logging.basicConfig(level=logging.INFO)
 
-# Paths and constants
+# Define constants
 LABEL_ENCODER_PATH = 'models/fcnn_label_encoder.pkl'
 MODEL_PATH = 'models/fcnn_bird_call_model.keras'
 UPLOAD_FOLDER = 'uploads'
 STATIC_FOLDER = os.path.abspath('static')
 ALLOWED_EXTENSIONS = {'.wav', '.mp3'}
-TEMPERATURE = 0.25
+TEMPERATURE = 0.25  # Adjust this value for best performance
 
-# Ensure folders exist
+# Ensure necessary folders exist
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(STATIC_FOLDER, exist_ok=True)
 
-# Load models
+# Load YAMNet model and fine-tuned model
 try:
     yamnet_model = hub.load("https://www.kaggle.com/models/google/yamnet/TensorFlow2/yamnet/1")
     model = tf.keras.models.load_model(MODEL_PATH)
@@ -45,9 +39,10 @@ except Exception as e:
 def allowed_file(filename):
     return '.' in filename and os.path.splitext(filename.lower())[1] in ALLOWED_EXTENSIONS
 
+# Function to preprocess audio and extract embeddings
 def preprocess_audio(file_path):
     try:
-        audio, sr = librosa.load(file_path, sr=16000)
+        audio, sr = librosa.load(file_path, sr=16000)  # YAMNet expects 16 kHz audio
         scores, embeddings, spectrogram = yamnet_model(audio)
         embedding_mean = tf.reduce_mean(embeddings, axis=0).numpy()
         normalized_embedding = (embedding_mean - np.mean(embedding_mean)) / np.std(embedding_mean)
@@ -62,47 +57,57 @@ async def prediction(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail="Invalid file format")
 
     contents = await file.read()
+    logging.info(f"Received file size: {len(contents)} bytes")
+    logging.info(f"File content type: {file.content_type}")
+
     file_path = os.path.join(UPLOAD_FOLDER, 'live_audio.wav')
     with open(file_path, "wb") as f:
         f.write(contents)
 
+    file_stats = os.stat(file_path)
+    logging.info(f"Saved file size: {file_stats.st_size} bytes")
+
     try:
         features = preprocess_audio(file_path)
+
         if features is None:
-            return {"error": "No bird detected"}
+            logging.error("No features extracted.")
+            return {"bird_name": "No bird detected"}
 
         features = np.expand_dims(features, axis=0)
         logits = model.predict(features)
+
         probabilities = tf.nn.softmax(logits)
         predicted_class = np.argmax(probabilities, axis=1)
         best_probability = probabilities.numpy()[0][predicted_class[0]] * 100
 
+        logging.info(f"Predicted class: {predicted_class}, Probability: {best_probability:.2f}%")
+
         threshold = 8
-        predicted_label = (
-            "No bird detected" if best_probability < threshold
-            else label_encoder.inverse_transform(predicted_class)[0]
-        )
-
-        if predicted_label == "Human":
-            result = {"bird_name": "No bird detected"}
+        if best_probability < threshold:
+            predicted_label = "No bird detected"
         else:
-            result = {"bird_name": predicted_label}
+            predicted_label = label_encoder.inverse_transform(predicted_class)[0]
 
+        result = {"bird_name": "No bird detected" if predicted_label == "Human" else predicted_label}
+        logging.info(f"Detected bird: {predicted_label}")
         return result
     except Exception as e:
         logging.error(f"Error during prediction: {e}")
         raise HTTPException(status_code=500, detail="Error processing the audio file")
 
-# Serve static files
-app.mount("/static", StaticFiles(directory=STATIC_FOLDER), name="static")
-
+# ✅ New endpoint to serve bird image based on prediction
 @app.get("/get_bird_image/{bird_name}/")
-async def get_bird_image(bird_name: str, request: Request):
+async def get_bird_image(request: Request, bird_name: str):
     bird_name = bird_name.lower().strip()
     for ext in ['.jpg', '.jpeg', '.png']:
-        filename = f"{bird_name}{ext}"
-        file_path = os.path.join(STATIC_FOLDER, filename)
+        file_path = os.path.join(STATIC_FOLDER, f"{bird_name}{ext}")
         if os.path.exists(file_path):
-            image_url = f"{request.base_url}static/{filename}"
-            return JSONResponse(content={"image_url": image_url})
+            base_url = str(request.base_url).rstrip('/')
+            return JSONResponse(content={
+                "image_url": f"{base_url}/static/{os.path.basename(file_path)}"
+            })
     return JSONResponse(content={"image_url": ""})
+
+# ✅ Mount static folder for image access
+app.mount("/static", StaticFiles(directory=STATIC_FOLDER), name="static")
