@@ -13,6 +13,10 @@ import logging
 
 # --- Setup ---
 app = FastAPI()
+@app.get("/")
+async def root():
+    return {"status": "ok"}
+
 logging.basicConfig(level=logging.INFO)
 
 app.add_middleware(
