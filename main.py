@@ -109,3 +109,11 @@ async def get_bird_image(bird_name: str, request: Request):
 
 # Mount static file route
 app.mount("/static", StaticFiles(directory=STATIC_FOLDER), name="static")
+
+@app.get("/debug/list_files")
+def list_files():
+    files = {}
+    for root, dirs, filenames in os.walk(".", topdown=True):
+        files[root] = filenames
+    return files
+
