@@ -6,4 +6,3 @@ librosa
 numpy
 scikit-learn
 python-multipart
-aiofiles
