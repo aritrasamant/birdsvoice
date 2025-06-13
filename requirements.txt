@@ -1,12 +1,8 @@
 fastapi
 uvicorn
-numpy
-librosa
-scipy
-scikit-learn
 tensorflow
-tensorflow-hub
-pydub
+tensorflow_hub
+librosa
+numpy
+scikit-learn
 python-multipart
-soundfile
-aiofiles
