@@ -58,24 +58,15 @@ def preprocess_audio(file_path):
 
 @app.post("/predict/")
 async def prediction(file: UploadFile = File(...)):
-    logging.info(f"Received file: {file.filename}")
-    logging.info(f"Content type: {file.content_type}")
-
     if not allowed_file(file.filename):
         raise HTTPException(status_code=400, detail="Unsupported file format")
 
     file_path = os.path.join(UPLOAD_FOLDER, 'live_audio.wav')
-    content = await file.read()
-
-    logging.info(f"Received file size: {len(content)} bytes")
-    logging.info(f"First 20 bytes: {content[:20]}")
-
     with open(file_path, "wb") as f:
-        f.write(content)
+        f.write(await file.read())
 
     features = preprocess_audio(file_path)
     if features is None:
-        logging.warning("Preprocessing returned None (probably due to silence or error)")
         return {"bird_name": "No bird detected"}
 
     features = np.expand_dims(features, axis=0)
@@ -92,14 +83,10 @@ async def prediction(file: UploadFile = File(...)):
             if best_confidence >= threshold else "No bird detected"
         )
 
-        # Log top 3 predictions
+        # Optional: log top 3 predictions
         top_indices = np.argsort(probabilities)[::-1][:3]
         top_labels = label_encoder.inverse_transform(top_indices)
-        logging.info("Top predictions:")
-        for i in range(3):
-            label = top_labels[i]
-            score = probabilities[top_indices[i]] * 100
-            logging.info(f"{label}: {score:.2f}%")
+        logging.info(f"Top predictions: {[(label, round(probabilities[i]*100, 2)) for i, label in zip(top_indices, top_labels)]}")
 
         result = {"bird_name": predicted_label if predicted_label != "Human" else "No bird detected"}
         return result
@@ -107,7 +94,7 @@ async def prediction(file: UploadFile = File(...)):
         logging.error(f"Inference failed: {e}")
         raise HTTPException(status_code=500, detail="Prediction error")
 
-# Static image API
+# Static image API with dynamic URL
 @app.get("/get_bird_image/{bird_name}/")
 async def get_bird_image(bird_name: str, request: Request):
     bird_name = bird_name.lower().strip()
@@ -120,5 +107,5 @@ async def get_bird_image(bird_name: str, request: Request):
             })
     return JSONResponse(content={"image_url": ""})
 
-# Serve static images
+# Mount static file route
 app.mount("/static", StaticFiles(directory=STATIC_FOLDER), name="static")
