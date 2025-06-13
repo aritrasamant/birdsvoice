@@ -1,8 +1,10 @@
 fastapi
 uvicorn
 tensorflow
-tensorflow_hub
+tensorflow-hub
 librosa
 numpy
 scikit-learn
+pydub
 python-multipart
+aiofiles
