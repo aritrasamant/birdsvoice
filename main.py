@@ -57,7 +57,27 @@ def preprocess_audio(file_path):
     except Exception as e:
         logging.error("Detailed traceback for preprocessing failure:", exc_info=True)
         return None
-
+        
+@app.on_event("startup")
+async def verify_static_files():
+    """Verify static files are accessible on startup"""
+    try:
+        if not os.path.exists(STATIC_FOLDER):
+            logging.error(f"❌ Critical: Static folder missing at {STATIC_FOLDER}")
+        else:
+            files = os.listdir(STATIC_FOLDER)
+            if not files:
+                logging.warning("⚠️ Static folder exists but is empty")
+            else:
+                logging.info(f"✅ Found {len(files)} static files")
+                for f in sorted(files)[:5]:  # Log first 5 files
+                    logging.debug(f" - {f}")
+                if len(files) > 5:
+                    logging.debug(f" - ...and {len(files)-5} more")
+    
+    except Exception as e:
+        logging.critical(f"🔥 Failed to verify static files: {str(e)}")
+        
 @app.post("/predict/")
 async def prediction(file: UploadFile = File(...)):
     if not allowed_file(file.filename):
@@ -92,17 +112,45 @@ async def prediction(file: UploadFile = File(...)):
 
 @app.get("/get_bird_image/{bird_name}/")
 async def get_bird_image(bird_name: str, request: Request):
-    bird_name = unquote(bird_name).lower().strip()  # Decode '%20' to space
-    for ext in ['.jpg', '.jpeg', '.png']:
+    """Improved static file handling for Railway"""
+    bird_name = bird_name.lower().strip()
+    
+    # Supported extensions in order of preference
+    extensions = ['.jpg', '.jpeg', '.png', '.webp']
+    
+    # Check static directory exists
+    if not os.path.exists(STATIC_FOLDER):
+        logger.error(f"Static folder not found at: {STATIC_FOLDER}")
+        return JSONResponse(content={"image_url": ""})
+    
+    # Search for matching files
+    for ext in extensions:
+        # Try exact match first
         filename = f"{bird_name}{ext}"
         file_path = os.path.join(STATIC_FOLDER, filename)
-        logging.info(f"Checking image file: {file_path}")
-        if os.path.isfile(file_path):
-            # Build correct static URL
+        
+        if os.path.exists(file_path):
             base_url = str(request.base_url).rstrip("/")
-            static_url = f"{base_url}/static/{filename.replace(' ', '%20')}"
-            return JSONResponse(content={"image_url": static_url})
-    return JSONResponse(content={"image_url": ""})
+            return JSONResponse(content={
+                "image_url": f"{base_url}/static/{filename}",
+                "status": "found"
+            })
+        
+        # Try case-insensitive match if exact match fails
+        for existing_file in os.listdir(STATIC_FOLDER):
+            if existing_file.lower() == filename.lower():
+                base_url = str(request.base_url).rstrip("/")
+                return JSONResponse(content={
+                    "image_url": f"{base_url}/static/{existing_file}",
+                    "status": "found"
+                })
+    
+    logger.warning(f"No image found for: {bird_name}")
+    return JSONResponse(content={
+        "image_url": "",
+        "status": "not_found",
+        "searched_names": [f"{bird_name}{ext}" for ext in extensions]
+    })
 
 
 
