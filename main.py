@@ -20,6 +20,7 @@ LABEL_ENCODER_PATH = 'models/fcnn_label_encoder2.pkl'
 MODEL_PATH = 'models/fcnn_bird_call_model2.keras'
 UPLOAD_FOLDER = 'uploads'
 STATIC_FOLDER = os.path.abspath('static')
+YAMNET_FOLDER = os.path.abspath('yamnet_model')
 ALLOWED_EXTENSIONS = {'.wav', '.mp3'}
 
 # Ensure folders exist
@@ -28,7 +29,7 @@ os.makedirs(STATIC_FOLDER, exist_ok=True)
 
 # Load models
 try:
-    yamnet_model = hub.load("https://www.kaggle.com/models/google/yamnet/TensorFlow2/yamnet/1")
+    yamnet_model = hub.load(YAMNET_FOLDER)
     model = tf.keras.models.load_model(MODEL_PATH)
     with open(LABEL_ENCODER_PATH, 'rb') as f:
         label_encoder = pickle.load(f)
