@@ -1,9 +1,10 @@
 fastapi
 uvicorn
 tensorflow
-tensorflow-hub
+tensorflow_hub
 librosa
+ffmpeg-python
+soundfile
+audioread
 numpy
 scikit-learn
-python-multipart
-ffmpeg-python
