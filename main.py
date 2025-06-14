@@ -42,19 +42,22 @@ def allowed_file(filename):
 # Audio Preprocessing with silence trimming and normalization
 def preprocess_audio(file_path):
     try:
+        logging.info(f"Loading audio from: {file_path}")
         audio, sr = librosa.load(file_path, sr=16000)
-        audio, _ = librosa.effects.trim(audio, top_db=30)  # Remove silence
+        logging.info(f"Audio loaded. Duration: {len(audio)/sr:.2f}s, SR: {sr}")
+
+        audio, _ = librosa.effects.trim(audio, top_db=30)
         if len(audio) == 0:
             logging.warning("Trimmed audio is empty.")
             return None
 
-        audio = librosa.util.normalize(audio)  # Normalize amplitude
+        audio = librosa.util.normalize(audio)
         scores, embeddings, _ = yamnet_model(audio)
         embedding_mean = tf.reduce_mean(embeddings, axis=0).numpy()
         normalized_embedding = (embedding_mean - np.mean(embedding_mean)) / np.std(embedding_mean)
         return normalized_embedding
     except Exception as e:
-        logging.error(f"Audio preprocessing failed: {e}")
+        logging.exception("Detailed traceback for preprocessing failure:")
         return None
 
 @app.post("/predict/")
