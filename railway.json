@@ -1,0 +1,39 @@
+{
+  "$schema": "https://railway.app/railway.schema.json",
+  "build": {
+    "nixpacks": {
+      "config": {
+        // Required system dependencies for audio processing
+        "packages": [
+          "ffmpeg",       // Audio/video processing
+          "libsndfile1",  // WAV file support
+          "libavcodec-extra" // Additional codecs
+        ],
+        
+        // Environment variables for TensorFlow
+        "env": {
+          "TFHUB_CACHE_DIR": "/tmp/tfhub_modules", // Model cache location
+          "LIBROSA_CACHE_DIR": "/tmp/librosa_cache" // Audio analysis cache
+        },
+        
+        // File handling configuration
+        "copyPaths": [
+          "./static",     // Bird images
+          "./models"      // Pretrained models
+        ],
+        
+        // Advanced build settings
+        "buildCommand": "pip install -r requirements.txt && python -c \"import nltk; nltk.download('punkt')\"",
+        "startCommand": "uvicorn main:app --host 0.0.0.0 --port $PORT"
+      }
+    }
+  },
+  
+  // Deployment settings
+  "deploy": {
+    "healthcheckPath": "/health",  // Endpoint for monitoring
+    "restartPolicy": {
+      "maxRetries": 3             // Auto-recovery attempts
+    }
+  }
+}
