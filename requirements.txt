@@ -6,3 +6,4 @@ librosa
 numpy
 scikit-learn
 python-multipart
+ffmpeg-python
