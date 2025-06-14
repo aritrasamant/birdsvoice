@@ -89,18 +89,21 @@ async def prediction(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail="Prediction error")
 
 # ✅ Modified Static image API with proper URL-decoding
-from fastapi.responses import FileResponse
-from urllib.parse import unquote
 
 @app.get("/get_bird_image/{bird_name}/")
-async def get_bird_image(bird_name: str):
+async def get_bird_image(bird_name: str, request: Request):
     bird_name = unquote(bird_name).lower().strip()  # Decode '%20' to space
     for ext in ['.jpg', '.jpeg', '.png']:
-        file_path = os.path.join(STATIC_FOLDER, f"{bird_name}{ext}")
+        filename = f"{bird_name}{ext}"
+        file_path = os.path.join(STATIC_FOLDER, filename)
         logging.info(f"Checking image file: {file_path}")
         if os.path.isfile(file_path):
-            return FileResponse(path=file_path, media_type="image/jpeg")
-    return JSONResponse(content={"detail": "Image not found"}, status_code=404)
+            # Build correct static URL
+            base_url = str(request.base_url).rstrip("/")
+            static_url = f"{base_url}/static/{filename.replace(' ', '%20')}"
+            return JSONResponse(content={"image_url": static_url})
+    return JSONResponse(content={"image_url": ""})
+
 
 
 # Mount static file route
