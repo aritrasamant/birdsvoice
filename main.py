@@ -1,141 +1,103 @@
 import os
-import io
-import asyncio
 import numpy as np
 import pickle
-import librosa
-import logging
-from fastapi import FastAPI, UploadFile, File, HTTPException, Request
-from fastapi.responses import JSONResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi import FastAPI, File, UploadFile, HTTPException, Request
 import tensorflow as tf
 import tensorflow_hub as hub
+import librosa
+import logging
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import JSONResponse
 
-# Initialize FastAPI
 app = FastAPI()
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
-# Constants
-ALLOWED_EXTENSIONS = {'.wav', '.mp3'}
-STATIC_FOLDER = 'static'
-MODEL_PATH = 'models/fcnn_bird_call_model2.keras'
+# Paths and constants
 LABEL_ENCODER_PATH = 'models/fcnn_label_encoder2.pkl'
-CONFIDENCE_THRESHOLD = 8  # Adjust based on your model's performance
+MODEL_PATH = 'models/fcnn_bird_call_model2.keras'
+UPLOAD_FOLDER = 'uploads'
+STATIC_FOLDER = os.path.abspath('static')
+YAMNET_MODEL_PATH = os.path.abspath('yamnet_model')
+ALLOWED_EXTENSIONS = {'.wav', '.mp3'}
 
-# Ensure static folder exists
+# Ensure folders exist
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(STATIC_FOLDER, exist_ok=True)
 
-# Global variables for loaded models
-yamnet_model = None
-model = None
-label_encoder = None
+# Load models
+try:
+    yamnet_model = hub.load(YAMNET_MODEL_PATH)
+    model = tf.keras.models.load_model(MODEL_PATH)
+    with open(LABEL_ENCODER_PATH, 'rb') as f:
+        label_encoder = pickle.load(f)
+except Exception as e:
+    logging.error(f"Model loading error: {e}")
+    raise
 
-@app.on_event("startup")
-async def load_models():
-    """Load ML models during startup"""
-    global yamnet_model, model, label_encoder
-    
+def allowed_file(filename):
+    return '.' in filename and os.path.splitext(filename.lower())[1] in ALLOWED_EXTENSIONS
+
+# Audio Preprocessing with silence trimming and normalization
+def preprocess_audio(file_path):
     try:
-        # Load YAMNet model from TensorFlow Hub
-        yamnet_model = hub.load("https://tfhub.dev/google/yamnet/1")
-        
-        # Load custom bird call classification model
-        model = tf.keras.models.load_model(MODEL_PATH)
-        
-        # Load label encoder
-        with open(LABEL_ENCODER_PATH, 'rb') as f:
-            label_encoder = pickle.load(f)
-            
-        logger.info("All models loaded successfully")
-        
-    except Exception as e:
-        logger.error(f"Failed to load models: {e}")
-        raise RuntimeError("Model loading failed")
-
-def allowed_file(filename: str) -> bool:
-    """Check if file has allowed extension"""
-    return any(filename.lower().endswith(ext) for ext in ALLOWED_EXTENSIONS)
-
-def preprocess_audio(audio_data: bytes):
-    """
-    Process audio data directly from memory
-    Returns: Normalized audio embeddings or None if processing fails
-    """
-    try:
-        # Load audio from bytes
-        audio, sr = librosa.load(io.BytesIO(audio_data), sr=16000)
-        
-        # Trim silence and normalize
-        audio, _ = librosa.effects.trim(audio, top_db=30)
+        audio, sr = librosa.load(file_path, sr=16000)
+        audio, _ = librosa.effects.trim(audio, top_db=30)  # Remove silence
         if len(audio) == 0:
-            logger.warning("Trimmed audio is empty")
+            logging.warning("Trimmed audio is empty.")
             return None
-            
-        audio = librosa.util.normalize(audio)
-        
-        # Extract embeddings using YAMNet
+
+        audio = librosa.util.normalize(audio)  # Normalize amplitude
         scores, embeddings, _ = yamnet_model(audio)
         embedding_mean = tf.reduce_mean(embeddings, axis=0).numpy()
-        return (embedding_mean - np.mean(embedding_mean)) / np.std(embedding_mean)
-        
+        normalized_embedding = (embedding_mean - np.mean(embedding_mean)) / np.std(embedding_mean)
+        return normalized_embedding
     except Exception as e:
-        logger.error(f"Audio processing failed: {e}")
+        logging.error(f"Audio preprocessing failed: {e}")
         return None
 
 @app.post("/predict/")
-async def predict_bird(file: UploadFile = File(...)):
-    """
-    Handle bird sound prediction requests
-    Processes audio entirely in memory without saving to disk
-    """
+async def prediction(file: UploadFile = File(...)):
     if not allowed_file(file.filename):
-        raise HTTPException(status_code=400, detail="Unsupported file format. Please upload WAV or MP3.")
+        raise HTTPException(status_code=400, detail="Unsupported file format")
 
+    file_path = os.path.join(UPLOAD_FOLDER, 'live_audio.wav')
+    with open(file_path, "wb") as f:
+        f.write(await file.read())
+
+    features = preprocess_audio(file_path)
+    if features is None:
+        return {"bird_name": "No bird detected"}
+
+    features = np.expand_dims(features, axis=0)
     try:
-        # Read file contents into memory
-        contents = await file.read()
-        
-        # Process audio
-        features = preprocess_audio(contents)
-        if features is None:
-            return {"bird_name": "No bird detected"}
-            
-        # Make prediction
-        features = np.expand_dims(features, axis=0)
         logits = model.predict(features)
         probabilities = tf.nn.softmax(logits).numpy()[0]
+
         best_index = np.argmax(probabilities)
         best_confidence = probabilities[best_index] * 100
 
-        # Apply confidence threshold
+        threshold = 8  # Adjustable confidence threshold
         predicted_label = (
             label_encoder.inverse_transform([best_index])[0]
-            if best_confidence >= CONFIDENCE_THRESHOLD
-            else "No bird detected"
+            if best_confidence >= threshold else "No bird detected"
         )
 
-        # Log prediction results
-        logger.info(f"Prediction: {predicted_label} (Confidence: {best_confidence:.2f}%)")
-        
-        # Filter out human sounds
-        final_label = "No bird detected" if predicted_label == "Human" else predicted_label
-        return {"bird_name": final_label}
-        
-    except asyncio.TimeoutError:
-        logger.error("Prediction timeout")
-        return {"bird_name": "No bird detected"}
-    except Exception as e:
-        logger.error(f"Prediction error: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        # Optional: log top 3 predictions
+        top_indices = np.argsort(probabilities)[::-1][:3]
+        top_labels = label_encoder.inverse_transform(top_indices)
+        logging.info(f"Top predictions: {[(label, round(probabilities[i]*100, 2)) for i, label in zip(top_indices, top_labels)]}")
 
+        result = {"bird_name": predicted_label if predicted_label != "Human" else "No bird detected"}
+        return result
+    except Exception as e:
+        logging.error(f"Inference failed: {e}")
+        raise HTTPException(status_code=500, detail="Prediction error")
+
+# Static image API with dynamic URL
 @app.get("/get_bird_image/{bird_name}/")
 async def get_bird_image(bird_name: str, request: Request):
-    """
-    Serve bird images from static files
-    """
     bird_name = bird_name.lower().strip()
     for ext in ['.jpg', '.jpeg', '.png']:
         file_path = os.path.join(STATIC_FOLDER, f"{bird_name}{ext}")
@@ -146,12 +108,5 @@ async def get_bird_image(bird_name: str, request: Request):
             })
     return JSONResponse(content={"image_url": ""})
 
-@app.get("/health")
-async def health_check():
-    """Health check endpoint for monitoring"""
-    return {"status": "healthy", "models_loaded": all(
-        [yamnet_model is not None, model is not None, label_encoder is not None]
-    )}
-
-# Mount static files
+# Mount static file route
 app.mount("/static", StaticFiles(directory=STATIC_FOLDER), name="static")
