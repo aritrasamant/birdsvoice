@@ -8,3 +8,4 @@ soundfile
 audioread
 numpy
 scikit-learn
+python-multipart
